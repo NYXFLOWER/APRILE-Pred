@@ -1,5 +1,5 @@
 from sklearn import metrics
-from .parameters import *
+from .parameter import *
 import scipy.sparse as sp
 import numpy as np
 import torch
@@ -120,7 +120,7 @@ def get_edge_index_from_coo(mat, bidirection):
     if bidirection:
         mask = mat.row > mat.col
         half = np.concatenate([mat.row[mask].reshape(1, -1), mat.col[mask].reshape(1, -1)], axis=0)
-        full = np.concatenate([half, half[[0, 1], :]], axis=1)
+        full = np.concatenate([half, half[[1, 0], :]], axis=1)
         return torch.from_numpy(full.astype(np.int64))
     else:
         tmp = np.concatenate([mat.row.reshape(1, -1), mat.col.reshape(1, -1)], axis=0)
