@@ -9,16 +9,18 @@ import time
 import pandas as pds
 import os
 
-root = '..'
+print(os.path.abspath(os.getcwd()))
+
+root = '.'
 
 with open(root + '/data/decagon_et.pkl', 'rb') as f:   # the whole dataset
     et_list = pickle.load(f)
 
 
-out_dir = root + '/exp_out/'
+out_dir = root + '/evaluation/exp_out/'
 
 et_list = et_list
-EPOCH_NUM = 100
+EPOCH_NUM = 50
 feed_dict = load_data_torch(root + "/data/", et_list, mono=True)
 data = Data.from_dict(feed_dict)
 
@@ -27,8 +29,6 @@ n_prot, n_prot_feat = data.p_feat.shape
 
 data.pp_index = get_edge_index_from_coo(data.pp_adj, True)
 data.pd_index = get_edge_index_from_coo(data.dp_adj, False)[[1, 0], :]
-
-
 
 # Reindexing drugs and edge types (side effects)
 drug_dict = {}
@@ -62,7 +62,7 @@ print(device_name)
 device = torch.device(device_name)
 
 
-nhids_gcn = [32, 32, 32, 32, 32, 32]
+nhids_gcn = [64, 64, 64]
 prot_out_dim = sum(nhids_gcn)
 drug_dim = 128
 
@@ -75,21 +75,8 @@ model = Model(pp, pd, mip).to('cpu')
 name = 'poly-' + str(nhids_gcn) + '-' + str(drug_dim)
 model.load_state_dict(torch.load(out_dir + name + '-model.pt'))
 
-
-
-class Pre_mask(torch.nn.Module):
-    def __init__(self, pp_n_link, pd_n_link):
-        super(Pre_mask, self).__init__()
-        self.pp_weight = Parameter(torch.Tensor(pp_n_link))
-        self.pd_weight = Parameter(torch.Tensor(pd_n_link))
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        self.pp_weight.data.normal_(mean=0, std=1)
-        self.pd_weight.data.normal_(mean=0, std=1)
-
-pp_static_edge_weights = torch.zeros((data.pp_index.shape[1])).to(device)
-pd_static_edge_weights = torch.zeros((data.pd_index.shape[1])).to(device)
+pp_static_edge_weights = torch.ones((data.pp_index.shape[1])).to(device)
+pd_static_edge_weights = torch.ones((data.pd_index.shape[1])).to(device)
 
 pre_mask = Pre_mask(data.pp_index.shape[1] // 2, data.pd_index.shape[1]).to(device)
 data = data.to(device)
@@ -99,14 +86,113 @@ for gcn in model.pp.conv_list:
     gcn.cached = False
 model.pd.conv.cached = False
 
+
+test_neg_index = typed_negative_sampling(data.test_idx, n_drug, data.test_range).to(device)
+model.eval()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+record = np.zeros((4, n_et))
+for j in range(4):
+    x = model.pp(data.p_feat, data.pp_index, pp_static_edge_weights)
+
+    x.data[:, sum(nhids_gcn[:j]):] *= 0
+
+    z = model.pd(x, data.pd_index)
+    pos_score = model.mip(z, data.test_idx, data.test_et)
+    neg_score = model.mip(z, test_neg_index, data.test_et)
+    for i in range(data.test_range.shape[0]):
+        [start, end] = data.test_range[i]
+        p_s = pos_score[start: end]
+        n_s = neg_score[start: end]
+
+        pos_target = torch.ones(p_s.shape[0])
+        neg_target = torch.zeros(n_s.shape[0])
+
+        score = torch.cat([p_s, n_s])
+        target = torch.cat([pos_target, neg_target])
+
+        record[j, i] = auprc_auroc_ap(target, score)[0]
+print(record.mean(axis=1))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+record = np.zeros((3, n_et))
+for j in range(1, 4):
+    x = model.pp(data.p_feat, data.pp_index, pp_static_edge_weights)
+
+    x.data[:, sum(nhids_gcn[:j]):] *= 0
+
+    z = model.pd(x, data.pd_index)
+    pos_score = model.mip(z, data.test_idx, data.test_et)
+    neg_score = model.mip(z, test_neg_index, data.test_et)
+    for i in range(data.test_range.shape[0]):
+        [start, end] = data.test_range[i]
+        p_s = pos_score[start: end]
+        n_s = neg_score[start: end]
+
+        pos_target = torch.ones(p_s.shape[0])
+        neg_target = torch.zeros(n_s.shape[0])
+
+        score = torch.cat([p_s, n_s])
+        target = torch.cat([pos_target, neg_target])
+
+        record[j-1, i] = auprc_auroc_ap(target, score)[0]
+
+
+et_index = np.array(final_et_list).reshape(-1, 1)
+combine = np.concatenate([et_index, np.array(n_edges_per_type).reshape(-1, 1), record.T], axis=1)
+df = pds.DataFrame(combine, columns=['side_effect', 'n_instance', 'auprc-1', 'auprc-2', 'auprc-3'])
+df.astype({'side_effect': 'int32'})
+df.to_csv('./' + name + '-layerwise.csv')
+
+
+
+
 optimizer = torch.optim.Adam(pre_mask.parameters(), lr=0.01)
 fake_optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
 '''
-side effect id: 458
-index: 434
-n_instance: 748
-auprc: 97
+side effect id: 757
+new index: 695
+n_instance: 273
+auprc: 0th: 92; 1st: 95; 2nd: 97;
 '''
 
 pre_mask.reset_parameters()
