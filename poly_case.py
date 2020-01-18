@@ -18,7 +18,7 @@ with open(root + '/data/decagon_et.pkl', 'rb') as f:   # the whole dataset
 out_dir = root + '/exp_out/'
 
 et_list = et_list
-EPOCH_NUM = 100
+EPOCH_NUM = 50
 feed_dict = load_data_torch(root + "/data/", et_list, mono=True)
 data = Data.from_dict(feed_dict)
 
@@ -62,8 +62,9 @@ print(device_name)
 device = torch.device(device_name)
 
 
-nhids_gcn = [32, 32, 32, 32, 32, 32]
+nhids_gcn = [128, 64, 64]
 prot_out_dim = sum(nhids_gcn)
+# prot_out_dim = 32
 drug_dim = 128
 
 
@@ -103,6 +104,8 @@ def train():
     loss = pos_loss + neg_loss
 
     loss.backward()
+
+
     optimizer.step()
 
     record = np.zeros((3, n_et))  # auprc, auroc, ap
@@ -154,32 +157,32 @@ def test(z):
 
     return record
 
+if __name__ == '__main__':
+    print('model training ...')
+    for epoch in range(EPOCH_NUM):
+        time_begin = time.time()
 
-print('model training ...')
-for epoch in range(EPOCH_NUM):
-    time_begin = time.time()
+        z, loss = train()
 
-    z, loss = train()
+        record_te = test(z)
+        [auprc, auroc, ap] = record_te.mean(axis=1)
 
-    record_te = test(z)
-    [auprc, auroc, ap] = record_te.mean(axis=1)
+        print('{:3d}   loss:{:0.4f}   auprc:{:0.4f}   auroc:{:0.4f}   ap@50:{:0.4f}    time:{:0.1f}\n'
+              .format(epoch, loss.tolist(), auprc, auroc, ap, (time.time() - time_begin)))
 
-    print('{:3d}   loss:{:0.4f}   auprc:{:0.4f}   auroc:{:0.4f}   ap@50:{:0.4f}    time:{:0.1f}\n'
-          .format(epoch, loss.tolist(), auprc, auroc, ap, (time.time() - time_begin)))
-
-    test_record[epoch] = record_te
-    test_out[epoch] = [auprc, auroc, ap]
+        test_record[epoch] = record_te
+        test_out[epoch] = [auprc, auroc, ap]
 
 
-name = 'poly-' + str(nhids_gcn) + '-' + str(drug_dim)
+    name = 'poly-' + str(nhids_gcn) + '-' + str(drug_dim)
 
-# save model
-torch.save(model.to('cpu').state_dict(), out_dir + name + '-model.pt')
+    # save model
+    torch.save(model.to('cpu').state_dict(), out_dir + name + '-model.pt')
 
-# save record
-last_record = test_record[EPOCH_NUM-1].T
-et_index = np.array(final_et_list).reshape(-1, 1)
-combine = np.concatenate([et_index, np.array(n_edges_per_type).reshape(-1, 1), last_record], axis=1)
-df = pds.DataFrame(combine, columns=['side_effect', 'n_instance', 'auprc', 'auroc', 'ap'])
-df.astype({'side_effect': 'int32'})
-df.to_csv(out_dir + name + '-record.csv')
+    # save record
+    last_record = test_record[EPOCH_NUM-1].T
+    et_index = np.array(final_et_list).reshape(-1, 1)
+    combine = np.concatenate([et_index, np.array(n_edges_per_type).reshape(-1, 1), last_record], axis=1)
+    df = pds.DataFrame(combine, columns=['side_effect', 'n_instance', 'auprc', 'auroc', 'ap'])
+    df.astype({'side_effect': 'int32'})
+    df.to_csv(out_dir + name + '-record.csv')
