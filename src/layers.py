@@ -20,9 +20,11 @@ np.random.seed(1111)
 EPS = 1e-13
 
 
-#########################################################################
-# Decoder - Multirelational Link Prediction
-#########################################################################
+def normalize(input):
+    norm_square = (input ** 2).sum(dim=1)
+    return input / torch.sqrt(norm_square.view(-1, 1))
+
+
 class MultiInnerProductDecoder(torch.nn.Module):
     def __init__(self, in_dim, num_et):
         super(MultiInnerProductDecoder, self).__init__()
@@ -38,6 +40,7 @@ class MultiInnerProductDecoder(torch.nn.Module):
 
     def reset_parameters(self):
         self.weight.data.normal_(std=1/np.sqrt(self.in_dim))
+
 
 class myGCN(MessagePassing):
 
@@ -87,7 +90,7 @@ class myGCN(MessagePassing):
             edge_index, edge_weight, fill_value, num_nodes)
 
         row, col = edge_index
-        deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
+        deg = scatter_add(edge_weight, col, dim=0, dim_size=num_nodes)
         deg_inv_sqrt = deg.pow(-0.5)
         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
 
@@ -137,6 +140,13 @@ class PP(torch.nn.Module):
         self.conv_list = torch.nn.ModuleList(
             [myGCN(nhid_list[i], nhid_list[i + 1], cached=True) for i in range(len(nhid_list) - 1)]
         )
+
+
+        # TODO:
+        self.embedding.requires_grad = False
+
+        # TODO:
+
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -146,31 +156,57 @@ class PP(torch.nn.Module):
         tmp = []
 
         x = self.embedding
+
+        # TODO
+        # x = normalize(x)
+        # TODO
+
         tmp.append(x)
 
         for net in self.conv_list[:-1]:
             x = net(x, pp_edge_index, edge_weight)
+
+            # TODO
+            # x = normalize(x)
             x = F.relu(x, inplace=True)
+            # TODO
+
             tmp.append(x)
 
         x = self.conv_list[-1](x, pp_edge_index, edge_weight)
+
+
+        # TODO
+        # x = normalize(x)
         x = F.relu(x, inplace=True)
+        # TODO
+
         tmp.append(x)
 
+        # TODO
         print([torch.abs(a).detach().mean().tolist() for a in tmp])
+        # self.tmp = tmp
+        # [a.retain_grad() for a in self.tmp]
+        # TODO
 
+        # TODO
         return torch.cat(tmp, dim=1)
+        # TODO
 
 
 class PD(torch.nn.Module):
 
-    def __init__(self, protein_dim, d_dim_prot, n_drug, d_dim_feat=8):
+    def __init__(self, protein_dim, d_dim_prot, n_drug, d_dim_feat=32):
         super(PD, self).__init__()
         self.p_dim = protein_dim
         self.d_dim_prot = d_dim_prot
         self.d_dim_feat = d_dim_feat
         self.n_drug = n_drug
         self.d_feat = torch.nn.Parameter(torch.Tensor(n_drug, d_dim_feat))
+
+        # TODO:
+        self.d_feat.requires_grad = False
+        # TODO:
 
         self.conv = myGCN(protein_dim, d_dim_prot, cached=True)
         self.reset_parameters()
@@ -181,14 +217,14 @@ class PD(torch.nn.Module):
     def reset_parameters(self):
         self.d_feat.data.normal_()
 
-    def forward(self, x, pd_edge_index):
+    def forward(self, x, pd_edge_index, edge_weight=None):
 
         n_prot = x.shape[0]
         tmp = pd_edge_index + 0
         tmp[1, :] += n_prot
 
         x = torch.cat([x, torch.zeros((self.n_drug, x.shape[1])).to(x.device)], dim=0)
-        x = self.conv(x, tmp)[n_prot:, :]
+        x = self.conv(x, tmp, edge_weight)[n_prot:, :]
         x = F.relu(x)
         x = torch.cat([x, torch.abs(self.d_feat)], dim=1)
         return x
@@ -200,3 +236,15 @@ class Model(torch.nn.Module):
         self.pp = pp
         self.pd = pd
         self.mip = mip
+
+
+class Pre_mask(torch.nn.Module):
+    def __init__(self, pp_n_link, pd_n_link):
+        super(Pre_mask, self).__init__()
+        self.pp_weight = Parameter(torch.Tensor(pp_n_link))
+        self.pd_weight = Parameter(torch.Tensor(pd_n_link))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.pp_weight.data.normal_(mean=0, std=1)
+        self.pd_weight.data.normal_(mean=0, std=1)
