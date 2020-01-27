@@ -184,7 +184,7 @@ class PP(torch.nn.Module):
         tmp.append(x)
 
         # TODO
-        print([torch.abs(a).detach().mean().tolist() for a in tmp])
+        # print([torch.abs(a).detach().mean().tolist() for a in tmp])
         # self.tmp = tmp
         # [a.retain_grad() for a in self.tmp]
         # TODO
@@ -238,13 +238,13 @@ class Model(torch.nn.Module):
         self.mip = mip
 
 
-class Pre_mask(torch.nn.Module):
-    def __init__(self, pp_n_link, pd_n_link):
-        super(Pre_mask, self).__init__()
-        self.pp_weight = Parameter(torch.Tensor(pp_n_link))
-        self.pd_weight = Parameter(torch.Tensor(pd_n_link))
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        self.pp_weight.data.normal_(mean=0, std=1)
-        self.pd_weight.data.normal_(mean=0, std=1)
+# class Pre_mask(torch.nn.Module):
+#     def __init__(self, pp_n_link, pd_n_link):
+#         super(Pre_mask, self).__init__()
+#         self.pp_weight = Parameter(torch.Tensor(pp_n_link))
+#         self.pd_weight = Parameter(torch.Tensor(pd_n_link))
+#         self.reset_parameters()
+#
+#     def reset_parameters(self):
+#         self.pp_weight.data.normal_(mean=0, std=1)
+#         self.pd_weight.data.normal_(mean=0, std=1)

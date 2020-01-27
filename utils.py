@@ -92,7 +92,7 @@ def visualize_graph(pp_idx, pp_weight, pd_idx, pd_weight,
         pos[p][1] += 0.05
     nx.draw_networkx_labels(G, pos, font_size=14)
 
-    plt.show()
+    plt.savefig()
 
 
 n_p_node = 10
