@@ -3,23 +3,31 @@
 from operator import mod
 from src.layers import *
 from src.utils import process_edges, auprc_auroc_ap
-import pandas as pd
+import pandas as pds
 import pickle
+import time
 import os
 
 #******************** Hyperparameter Setting *************************
 sp_rate = 0.8           # dataset split rate for traing and testing
 nhids_gcn = [64, 32, 32]
 drug_dim = 128
+EPOCH_NUM = 2
 #*********************************************************************
 
 # set working directory 
 root = os.path.abspath(os.getcwd())
-data_dir = root + '/data/'
+data_dir = os.path.join(root, 'data')
+out_dir = os.path.join(root, 'evaluation/new_out')
+name = f'{nhids_gcn}-{drug_dim}-{sp_rate}-{EPOCH_NUM}'
 
 # load data
-with open(data_dir + 'tipexp_data.pkl', 'rb') as f:
+with open(os.path.join(data_dir, 'tipexp_data.pkl'), 'rb') as f:
     data = pickle.load(f)
+
+# init output data
+train_out = np.zeros((EPOCH_NUM, 3))
+test_out = np.zeros((EPOCH_NUM, 3))
 
 # identify device
 device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -45,14 +53,10 @@ model = model.to(device)
 data = data.to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 static_edge_weights = torch.ones((data.pp_index.shape[1])).to(device)
-
-train_record = {}
-test_record = {}
-train_out = {}
-test_out = {}
+print(model)
 
 
-def record_eva(mod: str, pos_score: torch.Tensor, neg_score: torch.Tensor) -> np.array:
+def evaluate(mod: str, pos_score: torch.Tensor, neg_score: torch.Tensor) -> np.array:
     assert mod in {'train', 'test'}, "'idx' should in {'train', 'test'}"
     
     record = np.zeros((3, data.n_et))
@@ -73,7 +77,7 @@ def record_eva(mod: str, pos_score: torch.Tensor, neg_score: torch.Tensor) -> np
     return record
 
 
-def train():
+def train() -> tuple:
 
     model.train()
     optimizer.zero_grad()
@@ -82,7 +86,7 @@ def train():
     z = model.pd(z, data.pd_index)
 
     pos_index = data.train_idx
-    neg_index = typed_negative_sampling(data.train_idx, n_drug, data.train_range).to(device)
+    neg_index = typed_negative_sampling(data.train_idx, data.n_drug, data.train_range).to(device)
 
     pos_score = model.mip(z, pos_index, data.train_et)
     neg_score = model.mip(z, neg_index, data.train_et)
@@ -93,32 +97,25 @@ def train():
 
     loss.backward()
 
-
     optimizer.step()
 
-    record = record_eva('train', pos_score, neg_score)
+    record = evaluate('train', pos_score, neg_score)
 
-    train_record[epoch] = record
-    [auprc, auroc, ap] = record.mean(axis=1)
-    train_out[epoch] = [auprc, auroc, ap]
-
-    print('{:3d}   loss:{:0.4f}   auprc:{:0.4f}   auroc:{:0.4f}   ap@50:{:0.4f}'
-          .format(epoch, loss.tolist(), auprc, auroc, ap))
-
-    return z, loss
+    return z, loss, record
 
 
-def test(z):
+def test(z) -> np.array:
     model.eval()
 
     pos_score = model.mip(z, data.test_idx, data.test_et)
     neg_score = model.mip(z, test_neg_index, data.test_et)
 
-    return record_eva('test', pos_score, neg_score)
+    return evaluate('test', pos_score, neg_score)
 
 
-def layer_wise_eva():
+def layer_wise_eva() -> np.array:
     model.eval()
+    
     n_average = 200
     n_layer = 3
 
@@ -152,47 +149,52 @@ def layer_wise_eva():
 
     record = record / n_average
 
-    # construct table and write to file
-    et_index = np.array(range(data.n_et))
-    df_data = np.concatenate([et_index, np.array(data.n_edge_per_type).reshape(-1, 1), record.T], axis=1)
-    df = pd.DataFrame(df_data, columns=['side_effect', 'n_instance', 'auprc-0', 'auprc-1', 'auprc-2'])
-    
-    # //TODO
-    
+    return record
 
             
-
-
-
 if __name__ == '__main__':
-    print('model training ...')
+    print('Model training ...\n')
     for epoch in range(EPOCH_NUM):
         time_begin = time.time()
 
-        z, loss = train()
+        #********************** Train **********************
+        z, loss, record_train = train()
+        [auprc, auroc, ap] = record_train.mean(axis=1)
+        train_out[epoch] = [auprc, auroc, ap]
 
-        record_te = test(z)
-        [auprc, auroc, ap] = record_te.mean(axis=1)
+        print(f'{epoch:3d}   loss:{loss.tolist():0.4f}   auprc:{auprc:0.4f}   auroc:{auroc:0.4f}   ap@50:{ap:0.4f}')
 
-        print('{:3d}   loss:{:0.4f}   auprc:{:0.4f}   auroc:{:0.4f}   ap@50:{:0.4f}    time:{:0.1f}\n'
-              .format(epoch, loss.tolist(), auprc, auroc, ap, (time.time() - time_begin)))
-
-        test_record[epoch] = record_te
+        #********************** Test **********************
+        record_test = test(z)
+        [auprc, auroc, ap] = record_test.mean(axis=1)
         test_out[epoch] = [auprc, auroc, ap]
 
-
-    name = 'poly-' + str(nhids_gcn) + '-' + str(drug_dim)
+        print(f'{epoch:3d}   loss:{loss.tolist():0.4f}   auprc:{auprc:0.4f}   auroc:{auroc:0.4f}   ap@50:{ap:0.4f}    time:{(time.time() - time_begin):0.1f}\n')
 
     # save model
     torch.save(model.to('cpu').state_dict(), out_dir + name + '-model.pt')
+    print(f"The trained model is saved at epoch {EPOCH_NUM}")
 
     # save record
-    last_record = test_record[EPOCH_NUM-1].T
-    et_index = np.array(final_et_list).reshape(-1, 1)
-    combine = np.concatenate([et_index, np.array(n_edges_per_type).reshape(-1, 1), last_record], axis=1)
-    df = pds.DataFrame(combine, columns=['side_effect', 'n_instance', 'auprc', 'auroc', 'ap'])
-    df.astype({'side_effect': 'int32'})
+    with open(os.path.join(out_dir, name+'-record.pickle'), 'wb') as f:
+        pickle.dump({'train_out': train_out, 'test_out': test_out}, f)
+    print('The training and testing records are saved')
+
+    # save evaluation
+    last_record = record_test.T
+    nlayer_record = layer_wise_eva().T
+    
+    et_idx = np.array(range(data.n_et)).astype(np.int).reshape((-1, 1))
+    et_name = np.array([data.side_effect_idx_to_name[i] for i in range(data.n_et)]).astype(np.str).reshape((-1, 1))
+    n_instance = np.array(data.n_edges_per_type).astype(np.int).reshape((-1, 1))
+
+    df_data = np.concatenate([et_idx, et_name, n_instance, last_record, nlayer_record], axis=1)
+    df = pds.DataFrame(df_data.T, columns=['side_effect_idx', 'side_effect', 'n_instance', 'auprc', 'auroc', 'ap@50', 'auprc_layer-0', 'auprc_layer-1', 'auprc_layer-2'])
+    
     df.to_csv(out_dir + name + '-record.csv')
+    print('The evalution of the trained model is saved')
+
+    print('============== FINISHED ==============')
 
 
 
@@ -211,3 +213,5 @@ if __name__ == '__main__':
 
 
 
+
+# %%
