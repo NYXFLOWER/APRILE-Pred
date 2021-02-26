@@ -1,3 +1,4 @@
+# from typing import final
 from data.utils import load_data_torch
 import pickle
 from torch.nn import Module
@@ -9,7 +10,7 @@ import time
 import pandas as pds
 import os
 
-root = '..'
+root = '.'
 
 with open(root + '/data/decagon_et.pkl', 'rb') as f:   # the whole dataset
     et_list = pickle.load(f)
@@ -52,6 +53,10 @@ n_drug = drug_list_with_protein_links.shape[0]
 
 data.train_idx, data.train_et, data.train_range, \
 data.test_idx, data.test_et, data.test_range = process_edges(data.final_dd_edge_index)
+
+# with open('./tmp.pkl', 'wb') as f:
+#     pickle.dump(final_dd_edge_index, f)
+# print('saved!!!!!!!')
 
 n_et = len(data.test_range)
 print('{}'.format(n_et) + ' final side effects.')
