@@ -7,12 +7,18 @@ import pandas as pds
 import pickle
 import time
 import os
+import sys
 
 #******************** Hyperparameter Setting *************************
-sp_rate = 0.8           # dataset split rate for traing and testing
-nhids_gcn = [64, 32, 32]
-drug_dim = 128
-EPOCH_NUM = 2
+# sp_rate = 0.8           # dataset split rate for traing and testing
+# nhids_gcn = [64, 32, 32]
+# drug_dim = 128
+# EPOCH_NUM = 2
+
+sp_rate = int(sys.argv[1])
+nhids_gcn = [int(sys.argv[i]) for i in [2, 3, 4]]
+drug_dim = int(sys.argv[5])
+EPOCH_NUM = int(sys.argv[6])
 #*********************************************************************
 
 # set working directory 
@@ -31,16 +37,21 @@ test_out = np.zeros((EPOCH_NUM, 3))
 
 # identify device
 device_name = 'cuda' if torch.cuda.is_available() else 'cpu'
-print(f"==== DEVICE: {device_name} ====")
 device = torch.device(device_name)
 
+print("====================== Data Preparing ======================\n")
+print(f"Data split: {int(sp_rate*100)}\% data for trining")
 # split train and test dataset
 data.train_idx, data.train_et, data.train_range, \
-data.test_idx, data.test_et, data.test_range = process_edges(data.final_dd_edge_index, 0.9)
+data.test_idx, data.test_et, data.test_range = process_edges(data.final_dd_edge_index, sp_rate)
+print(f"--> positive training samples: {data.train_et.shape[0]}")
+print(f"--> positive testing  samples: {data.test_et.shape[0]}\n")
 
 # generate negative samples for testing
 test_neg_index = typed_negative_sampling(data.test_idx, data.n_drug, data.test_range).to(device)
+print('Negative testing samples are generated')
 
+print("====================== Model Setting ======================\n")
 #******************** Build Model ********************
 prot_out_dim = sum(nhids_gcn)
 
@@ -124,7 +135,7 @@ def layer_wise_eva() -> np.array:
         train_neg_index = typed_negative_sampling(data.train_idx, data.n_drug, data.train_range)
 
         for j in range(1, n_layer+1):
-            x = model.pp(data.p_feat, data.pp_index, data.pp_static_edge_weights)
+            x = model.pp(data.p_feat, data.pp_index, static_edge_weights)
 
             # remain the (previous and) current layer(s)
             x.data[:, sum(nhids_gcn[:j]):] *= 0     
@@ -153,7 +164,7 @@ def layer_wise_eva() -> np.array:
 
             
 if __name__ == '__main__':
-    print('Model training ...\n')
+    print('====================== Model training ====================== \n')
     for epoch in range(EPOCH_NUM):
         time_begin = time.time()
 
@@ -171,6 +182,7 @@ if __name__ == '__main__':
 
         print(f'{epoch:3d}   loss:{loss.tolist():0.4f}   auprc:{auprc:0.4f}   auroc:{auroc:0.4f}   ap@50:{ap:0.4f}    time:{(time.time() - time_begin):0.1f}\n')
 
+    print('====================== Results Saving ====================== \n')
     # save model
     torch.save(model.to('cpu').state_dict(), out_dir + name + '-model.pt')
     print(f"The trained model is saved at epoch {EPOCH_NUM}")
@@ -194,7 +206,7 @@ if __name__ == '__main__':
     df.to_csv(out_dir + name + '-record.csv')
     print('The evalution of the trained model is saved')
 
-    print('============== FINISHED ==============')
+    print('======================== FINISHED ========================')
 
 
 
