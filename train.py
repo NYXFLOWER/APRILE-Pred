@@ -9,23 +9,25 @@ import time
 import os
 import sys
 
+
 #******************** Hyperparameter Setting *************************
 # sp_rate = 0.8           # dataset split rate for traing and testing
 # nhids_gcn = [64, 32, 32]
 # drug_dim = 128
 # EPOCH_NUM = 2
 
-sp_rate = int(sys.argv[1])
+sp_rate = float(sys.argv[1])
 nhids_gcn = [int(sys.argv[i]) for i in [2, 3, 4]]
 drug_dim = int(sys.argv[5])
 EPOCH_NUM = int(sys.argv[6])
+torch.manual_seed(sys.argv[7])
 #*********************************************************************
 
 # set working directory 
 root = os.path.abspath(os.getcwd())
 data_dir = os.path.join(root, 'data')
 out_dir = os.path.join(root, 'evaluation/new_out')
-name = f'{nhids_gcn}-{drug_dim}-{sp_rate}-{EPOCH_NUM}'
+name = f'{nhids_gcn}-{drug_dim}-{sp_rate}-{EPOCH_NUM}-{sys.argv[7]}'
 
 # load data
 with open(os.path.join(data_dir, 'tipexp_data.pkl'), 'rb') as f:
@@ -140,7 +142,7 @@ def layer_wise_eva() -> np.array:
             # remain the (previous and) current layer(s)
             x.data[:, sum(nhids_gcn[:j]):] *= 0     
 
-            z = model.pd(x, data.pd_index, data.pd_static_edge_weights)
+            z = model.pd(x, data.pd_index)
             pos_score = model.mip(z, data.train_idx, data.train_et)
             neg_score = model.mip(z, train_neg_index, data.train_et)
 
@@ -182,9 +184,20 @@ if __name__ == '__main__':
 
         print(f'{epoch:3d}   loss:{loss.tolist():0.4f}   auprc:{auprc:0.4f}   auroc:{auroc:0.4f}   ap@50:{ap:0.4f}    time:{(time.time() - time_begin):0.1f}\n')
 
+    # print('=================== Layer-wised evaluation =================== \n')
+    # last_record = record_test.T
+    # nlayer_record = layer_wise_eva().T
+    
+    # et_idx = np.array(range(data.n_et)).astype(np.int).reshape((-1, 1))
+    # et_name = np.array([data.side_effect_idx_to_name[i] for i in range(data.n_et)]).astype(np.str).reshape((-1, 1))
+    # n_instance = np.array(data.n_edges_per_type).astype(np.int).reshape((-1, 1))
+
+    # df_data = np.concatenate([et_idx, et_name, n_instance, last_record, nlayer_record], axis=1)
+    # df = pds.DataFrame(df_data, columns=['side_effect_idx', 'side_effect', 'n_instance', 'auprc', 'auroc', 'ap@50', 'auprc_layer-0', 'auprc_layer-1', 'auprc_layer-2'])
+
     print('====================== Results Saving ====================== \n')
     # save model
-    torch.save(model.to('cpu').state_dict(), out_dir + name + '-model.pt')
+    torch.save(model.to('cpu').state_dict(), os.path.join(out_dir, name+'-model.pt'))
     print(f"The trained model is saved at epoch {EPOCH_NUM}")
 
     # save record
@@ -192,19 +205,13 @@ if __name__ == '__main__':
         pickle.dump({'train_out': train_out, 'test_out': test_out}, f)
     print('The training and testing records are saved')
 
-    # save evaluation
-    last_record = record_test.T
-    nlayer_record = layer_wise_eva().T
-    
-    et_idx = np.array(range(data.n_et)).astype(np.int).reshape((-1, 1))
-    et_name = np.array([data.side_effect_idx_to_name[i] for i in range(data.n_et)]).astype(np.str).reshape((-1, 1))
-    n_instance = np.array(data.n_edges_per_type).astype(np.int).reshape((-1, 1))
+    with open(os.path.join(out_dir, name+'.txt'), 'w') as f:
+        f.write("train: " + str(train_out[EPOCH_NUM-1]) + "\n")
+        f.write("test : " + str(test_out[EPOCH_NUM-1]))
 
-    df_data = np.concatenate([et_idx, et_name, n_instance, last_record, nlayer_record], axis=1)
-    df = pds.DataFrame(df_data.T, columns=['side_effect_idx', 'side_effect', 'n_instance', 'auprc', 'auroc', 'ap@50', 'auprc_layer-0', 'auprc_layer-1', 'auprc_layer-2'])
-    
-    df.to_csv(out_dir + name + '-record.csv')
-    print('The evalution of the trained model is saved')
+    # # save evaluation
+    # df.to_csv(os.path.join(out_dir, name + '-record.csv'))
+    # print('The evalution of the trained model is saved')
 
     print('======================== FINISHED ========================')
 
